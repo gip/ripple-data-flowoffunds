@@ -16,19 +16,38 @@ object FlowOfFundsActor {
 
 class FlowOfFundsActor(out: ActorRef) extends Actor {
   val rp = PaymentsFromFile // new PaymentsFromFile("/Users/gilles/gip/ripple/output_GilesPayments.csv.gz", "/Users/gilles/gip/ripple/ripple_gateways.csv")
+  var fof:Option[FlowOfFunds] = None;
+  var fofParams:Option[(String, String, Option[String], Option[Double])] = None;
   def receive = {
     case msg0: JsValue =>
-      //if (msg == "goodbye") self ! PoisonPill
-      // { "command": "flowoffund", "source": "rABC", "start_date": "2015-01-01", "end_date": null, "min_value_usd": 0.0001 }
-      val event = (msg0 \ "event").as[String]
       val msg = (msg0 \ "data").as[JsValue]
-      val cmd = (msg \ "command").as[String]
-      val src = (msg \ "source").as[String]
-      val startD = (msg \ "start_date").as[String]
-      val endD = Some((msg \ "end_date").as[String])
-      val valUSD = Some((msg \ "min_value_usd").as[Double])
-      val fof = rp.flowOfFunds(src, startD, endD, valUSD)
-      out ! fof.toJSON()
+      (msg0 \ "event").as[String] match {
+        case "flowoffund" => 
+          val src = (msg \ "source").as[String]
+          val startD = (msg \ "start_date").as[String]
+          val endD = Some((msg \ "end_date").as[String])
+          val valUSD = Some((msg \ "min_value_usd").as[Double])
+          if(fofParams==Some((src, startD, endD, valUSD))) {
+            // Nothing to do, result is cached
+          } else {
+            val fof0 = rp.flowOfFunds(src, startD, endD, valUSD)
+            fof = Some(fof0)
+            fofParams = Some((src, startD, endD, valUSD))
+          }
+          fof match {
+            case Some(fof0) => out ! fof0.toJSON()
+            case _ => ()
+          }
+        case "node" =>
+          fof match {
+            case Some(fof0) =>
+              val account = (msg \ "account").as[String]
+              val (outgoing, incoming) = fof0.findPayments(account)
+              val r = JsObject( List( ("account", JsString(account)), ("outgoing", JsArray(outgoing.map(_.toJSON))), ("incoming", JsArray(incoming.map(_.toJSON))) ) )
+              out ! JsObject( List(("event", JsString("flowoffunds_payments")), ("data", r)) )
+            case _ => ()
+          }
+      }
   }
 }
 
@@ -36,6 +55,13 @@ class FlowOfFundsActor(out: ActorRef) extends Actor {
 case class Payment(src: String, dest: String, date: String, curr: String, usd: Double, hash: String, toGateway: Boolean) extends Ordered[Payment] {
   import scala.math.Ordered.orderingToOrdered
   def compare(that: Payment): Int = this.hash compare that.hash
+  def toJSON = JsObject( List( ("source", JsString(src)), 
+                               ("destination", JsString(dest)),
+                               ("date", JsString(date)),
+                               ("usd", JsNumber(usd)),
+                               ("hash", JsString(hash))
+                         ) 
+                       )
 }
 
 case class FlowOfFunds(src: String, 
@@ -46,6 +72,8 @@ case class FlowOfFunds(src: String,
   val referenceUSD = order.toList.filter (t => t._2._1 == 0).head._2._5
 
   def findNodesByOrder(ord:Int) = order.toList.filter (t => t._2._1 == ord)
+
+  def findPayments(a:String) = (pays.toList.filter(p => p.src == a), pays.toList.filter(p => p.dest == a))
 
   def toJSON() = JsObject( List(("event", JsString("flowoffunds_done")), ("data", toJSON0())) )
 
