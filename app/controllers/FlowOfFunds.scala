@@ -149,7 +149,7 @@ abstract class RipplePayments {
 
 object PaymentsFromFile extends RipplePayments {
   
-  val paysFile = "/Users/gilles/gip/ripple/output_GilesPayments.csv.gz"
+  val paysFiles = List("/Users/gilles/gip/ripple/output_GilesPayments.csv.gz")
   val gatewaysFile = "/Users/gilles/gip/ripple/ripple_gateways.csv"
 
   var g = new TreeMap[String, String]()
@@ -162,14 +162,27 @@ object PaymentsFromFile extends RipplePayments {
 
   print("Loading payments ")
   var m = new TreeMap[(String, String, Double), (String, String, String)]()
-  val paysLines = scala.io.Source.fromInputStream( new GZIPInputStream(new BufferedInputStream(new FileInputStream(paysFile))) ).getLines
-  var z = 0
-  for( l <- paysLines ) {
-   z = z + 1
-   if (z % 100000 == 0) { print(".") }
-   val Array(hash, src, dest, c, i, v, usd, xrp, date) = l.split(",")
-   m = m + ((src, date, usd.toDouble) -> (dest, hash, c+"@"+i))
+  def load(paysFile: String) {
+    val paysLines = scala.io.Source.fromInputStream( new GZIPInputStream(new BufferedInputStream(new FileInputStream(paysFile))) ).getLines
+    var z = 0
+    var pacc = List[((String, String, Double), (String, String, String))]()
+    for( l <- paysLines ) {
+      z = z + 1
+      val Array(hash, src, dest, c, i, v, usd, xrp, date) = l.split(",")
+      pacc = ((src, date, usd.toDouble) -> (dest, hash, c+"@"+i)) :: pacc
+      if (z % 100000 == 0) { 
+        print(".") 
+        m = m ++ pacc
+        pacc = List()
+      } 
+    }
+    m = m ++ pacc
   }
+
+  for( f <- paysFiles ) {
+    load(f)
+  }
+  
 
   println(" Loaded, ready to execute")
 
